@@ -1,16 +1,43 @@
-# Images
+# DAOS Images
 
-This directory contains Cloud Build configuration files, Packer templates and scripts used for building DAOS images with [Cloud Build](https://cloud.google.com/build).
+The following instructions describe how to build DAOS client and server images.
 
-## Pre-Deployment steps required
+## Dependencies
 
-If you have not done so yet, please complete the steps in [Pre-Deployment Guide](../docs/pre-deployment_guide.md).
+Before you can build DAOS images you will need to do the following steps once.
+
+1. Install the Google Cloud Platform SDK and set a default project, region and zone
+
+   See https://cloud.google.com/sdk/docs/install
+
+   After you have installed the Google Cloud Platform SDK you need to set some
+   defaults.
+
+   To set defaults and initialize the configuration run:
+
+   ```shell
+   gcloud config set project <your project id>
+   gcloud config set compute/region <region>
+   gcloud config set compute/zone <zone>
+
+   # Initialize the configuration
+   gcloud init
+   ```
+
+2. Create a Packer Disk Image
+
+   The DAOS images are built in Google Cloud build using a Packer container
+   image that exists in your project.
+
+   Before you can build DAOS images you need to build the Packer container image.
+
+   Please visit the tutorial [quickstart-packer](https://cloud.google.com/cloud-build/docs/quickstart-packer).
+
+   You can leverage code from [cloud-builders-community](https://github.com/GoogleCloudPlatform/cloud-builders-community.git)
+   in the first step (the [packer folder](https://github.com/GoogleCloudPlatform/cloud-builders-community/tree/master/packer)).
+
 
 ## Building DAOS images
-
-The [Pre-Deployment Guide](../docs/pre-deployment_guide.md) includes instructions for building DAOS images.
-
-You can re-build your images with the following commands.
 
 Build both DAOS server and client images
 

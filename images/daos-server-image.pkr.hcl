@@ -48,8 +48,8 @@ source "googlecompute" "daos-server-centos-7" {
   }
   project_id              = "${var.project_id}"
   scopes                  = ["https://www.googleapis.com/auth/cloud-platform"]
-  source_image_family     = "centos-7"
-  source_image_project_id = ["centos-cloud"]
+  source_image_family     = "rocky-linux-8-optimized-gcp"
+  source_image_project_id = ["rocky-linux-cloud"]
   ssh_username            = "packer"
   zone                    = "${var.zone}"
   state_timeout           = "10m"
@@ -68,6 +68,20 @@ build {
     scripts          = [
       "./scripts/tune.sh",
       "./scripts/install_daos.sh"
+    ]
+  }
+
+  provisioner "file" {
+    source = "./scripts/cert_gen"
+    destination = "/tmp/"
+  }
+
+  provisioner "shell" {
+    inline = [
+      "sudo mkdir -p /var/daos/",
+      "sudo mv /tmp/cert_gen /var/daos/",
+      "sudo chmod +x /var/daos/cert_gen/*.sh",
+      "sudo chown -R root:root /var/daos/cert_gen"
     ]
   }
 }

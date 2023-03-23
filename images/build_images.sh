@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # Copyright 2022 Intel Corporation
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -17,12 +17,11 @@
 # Build DAOS server and client images using Packer in Google Cloud Build
 #
 
-set -eo pipefail
+set -e
 trap 'echo "Unexpected and unchecked error. Exiting."' ERR
 
-SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd -P)
-SCRIPT_FILENAME=$(basename "${BASH_SOURCE[0]}")
-
+SCRIPT_NAME=$(basename "$0")
+SCRIPT_DIR="$( cd "$( dirname "$0" )" && pwd )"
 START_TIMESTAMP=$(date "+%FT%T")
 
 # Set the default DAOS_VERSION
@@ -33,44 +32,21 @@ DAOS_REPO_BASE_URL="${DAOS_REPO_BASE_URL:-${DEFAULT_DAOS_REPO_BASE_URL}}"
 FORCE_REBUILD=0
 USE_IAP="${USE_IAP:-"true"}"
 BUILD_WORKER_POOL="${BUILD_WORKER_POOL:-""}"
-
 ERROR_MSGS=()
-
-# BEGIN: Logging variables and functions
-declare -A LOG_LEVELS=([DEBUG]=0 [INFO]=1  [WARN]=2   [ERROR]=3 [FATAL]=4 [OFF]=5)
-declare -A LOG_COLORS=([DEBUG]=2 [INFO]=12 [WARN]=3 [ERROR]=1 [FATAL]=9 [OFF]=0 [OTHER]=15)
-LOG_LEVEL=INFO
-
-log() {
-  local msg="$1"
-  local lvl=${2:-INFO}
-  if [[ ${LOG_LEVELS[$LOG_LEVEL]} -le ${LOG_LEVELS[$lvl]} ]]; then
-    if [[ -t 1 ]]; then tput setaf "${LOG_COLORS[$lvl]}"; fi
-    printf "[%-5s] %s\n" "$lvl" "${msg}" 1>&2
-    if [[ -t 1 ]]; then tput sgr0; fi
-  fi
-}
-
-log.debug() { log "${1}" "DEBUG" ; }
-log.info()  { log "${1}" "INFO"  ; }
-log.warn()  { log "${1}" "WARN"  ; }
-log.error() { log "${1}" "ERROR" ; }
-log.fatal() { log "${1}" "FATAL" ; }
-# END: Logging variables and functions
 
 show_help() {
    cat <<EOF
 
 Usage:
 
-  ${SCRIPT_FILENAME} <options>
+  ${SCRIPT_NAME} <options>
 
   Build DAOS Server and Client images
 
 Options:
 
   -t --type           DAOS_INSTALL_TYPE    Installation Type
-                                           Valid values [ all | client | server | admin ]
+                                           Valid values [ all | client | server ]
 
   [ -v --version      DAOS_VERSION ]       Version of DAOS to install
 
@@ -95,24 +71,49 @@ Examples:
 
   Build daos-client image with DAOS v${DAOS_VERSION} installed
 
-    ${SCRIPT_FILENAME} -t client
+    ${SCRIPT_NAME} -t client
 
   Build daos-server image with DAOS v${DAOS_VERSION} installed
 
-    ${SCRIPT_FILENAME} -t server
+    ${SCRIPT_NAME} -t server
 
   Build daos-client and daos-server images with DAOS v${DAOS_VERSION} installed
 
-    ${SCRIPT_FILENAME} -t all
+    ${SCRIPT_NAME} -t all
 
 EOF
+}
+
+log() {
+  msg="$1"
+  print_lines="$2"
+  # shellcheck disable=SC2155,SC2183
+  local line=$(printf "%80s" | tr " " "-")
+  if [[ -t 1 ]]; then tput setaf 14; fi
+  if [[ "${print_lines}" == 1 ]]; then
+    printf -- "\n%s\n %-78s \n%s\n" "${line}" "${msg}" "${line}"
+  else
+    printf -- "\n%s\n\n" "${msg}"
+  fi
+  if [[ -t 1 ]]; then tput sgr0; fi
+}
+
+log_error() {
+  # shellcheck disable=SC2155,SC2183
+  if [[ -t 1 ]]; then tput setaf 160; fi
+  printf -- "%s\n" "${1}" >&2;
+  if [[ -t 1 ]]; then tput sgr0; fi
+}
+
+log_section() {
+  log "$1" "1"
 }
 
 show_errors() {
   # If there are errors, print the error messages and exit
   if [[ ${#ERROR_MSGS[@]} -gt 0 ]]; then
     printf "\n" >&2
-    log.error "${ERROR_MSGS[@]}"
+    log_error "${ERROR_MSGS[@]}"
     show_help
     exit 1
   fi
@@ -120,7 +121,7 @@ show_errors() {
 
 verify_cloudsdk() {
   if ! gcloud -v &> /dev/null; then
-    log.error "gcloud not found
+    log_error "ERROR: gcloud not found
        Is the Google Cloud Platform SDK installed?
        See https://cloud.google.com/sdk/docs/install"
     exit 1
@@ -156,13 +157,13 @@ opts() {
       --version|-v)
         DAOS_VERSION="${2}"
         if [[ "${DAOS_VERSION}" == -* ]] || [[ "${DAOS_VERSION}" = "" ]] || [[ -z ${DAOS_VERSION} ]]; then
-          log.error "Missing VERSION value for -v or --version"
+          log_error "ERROR: Missing VERSION value for -v or --version"
           show_help
           exit 1
         else
           # Verify that it looks like a version number
           if ! echo "${DAOS_VERSION}" | grep -q -E "([0-9]{1,}\.)+[0-9]{1,}"; then
-            log.error "Value '${DAOS_VERSION}' for -v or --version does not appear to be a valid version"
+            log_error "ERROR: Value '${DAOS_VERSION}' for -v or --version does not appear to be a valid version"
             show_help
             exit 1
           fi
@@ -172,7 +173,7 @@ opts() {
       --repo-baseurl|-u)
         DAOS_REPO_BASE_URL="${2}"
         if [[ "${DAOS_REPO_BASE_URL}" == -* ]] || [[ "${DAOS_REPO_BASE_URL}" = "" ]] || [[ -z ${DAOS_REPO_BASE_URL} ]]; then
-          log.error "Missing URL value for --repo-baseurl"
+          log_error "ERROR: Missing URL value for --repo-baseurl"
           show_help
           exit 1
         fi
@@ -181,7 +182,7 @@ opts() {
       --project|-p)
         GCP_PROJECT="$2"
         if [[ "${GCP_PROJECT}" == -* ]] || [[ "${GCP_PROJECT}" = "" ]] || [[ -z ${GCP_PROJECT} ]]; then
-          ERROR_MSGS+=("Missing GCP_PROJECT value for -p or --project")
+          ERROR_MSGS+=("ERROR: Missing GCP_PROJECT value for -p or --project")
           break
         fi
         shift 2
@@ -189,7 +190,7 @@ opts() {
       --zone|-z)
         GCP_ZONE="$2"
         if [[ "${GCP_ZONE}" == -* ]] || [[ "${GCP_ZONE}" = "" ]] || [[ -z ${GCP_ZONE} ]]; then
-          ERROR_MSGS+=("Missing GCP_ZONE value for -z or --zone")
+          ERROR_MSGS+=("ERROR: Missing GCP_ZONE value for -z or --zone")
           break
         fi
         shift 2
@@ -201,7 +202,7 @@ opts() {
       --worker-pool|-w)
         BUILD_WORKER_POOL="${2}"
         if [[ "${BUILD_WORKER_POOL}" == -* ]] || [[ "${BUILD_WORKER_POOL}" = "" ]] || [[ -z ${BUILD_WORKER_POOL} ]]; then
-          ERROR_MSGS+=("Missing BUILD_WORKER_POOL value for -w or --worker-pool")
+          ERROR_MSGS+=("ERROR: Missing BUILD_WORKER_POOL value for -w or --worker-pool")
           break
         fi
         shift 2
@@ -209,7 +210,7 @@ opts() {
       --use-iap|-i)
         USE_IAP="${2}"
         if [[ "${USE_IAP}" == -* ]] || [[ "${USE_IAP}" = "" ]] || [[ -z ${USE_IAP} ]]; then
-          ERROR_MSGS+=("Missing USE_IAP value for -i or --use-iap")
+          ERROR_MSGS+=("ERROR: Missing USE_IAP value for -i or --use-iap")
           break
         fi
         shift 2
@@ -222,12 +223,12 @@ opts() {
         break
       ;;
 	    --*|-*)
-        log.error "Unrecognized option '${1}'"
+        log_error "ERROR: Unrecognized option '${1}'"
         show_help
         exit 1
       ;;
 	    *)
-        log.error "Unrecognized option '${1}'"
+        log_error "ERROR: Unrecognized option '${1}'"
         shift
         break
       ;;
@@ -329,7 +330,7 @@ build_images() {
     # Need to parse the correct region to use it instead of the default one "global".
     # Format: projects/{project}/locations/{region}/workerPools/{workerPool}
     BUILD_WORKER_POOL_ARRAY=(${BUILD_WORKER_POOL//// })
-    BUILD_REGION="${BUILD_WORKER_POOL_ARRAY[3]}"
+    BUILD_REGION=${BUILD_WORKER_POOL_ARRAY[3]}
     BUILD_OPTIONAL_ARGS+=" --worker-pool=${BUILD_WORKER_POOL}"
 
     log "Using build worker pool ${BUILD_WORKER_POOL}, region ${BUILD_REGION}"
@@ -342,18 +343,16 @@ build_images() {
   # Increase timeout to 1hr to make sure we don't time out
   if [[ "${DAOS_INSTALL_TYPE}" =~ ^(all|server)$ ]]; then
     log "Building server image"
-    # shellcheck disable=SC2086
     gcloud builds submit --timeout=1800s \
     --substitutions="_PROJECT_ID=${GCP_PROJECT},_ZONE=${GCP_ZONE},_DAOS_VERSION=${DAOS_VERSION},_DAOS_REPO_BASE_URL=${DAOS_REPO_BASE_URL},_USE_IAP=${USE_IAP}" \
-    --config=packer_cloudbuild-server.yaml ${BUILD_OPTIONAL_ARGS} .
+    --config=packer_cloudbuild-server.yaml $BUILD_OPTIONAL_ARGS .
   fi
 
   if [[ "${DAOS_INSTALL_TYPE}" =~ ^(all|client)$ ]]; then
     log "Building client image"
-    # shellcheck disable=SC2086
     gcloud builds submit --timeout=1800s \
     --substitutions="_PROJECT_ID=${GCP_PROJECT},_ZONE=${GCP_ZONE},_DAOS_VERSION=${DAOS_VERSION},_DAOS_REPO_BASE_URL=${DAOS_REPO_BASE_URL},_USE_IAP=${USE_IAP}" \
-    --config=packer_cloudbuild-client.yaml ${BUILD_OPTIONAL_ARGS} .
+    --config=packer_cloudbuild-client.yaml $BUILD_OPTIONAL_ARGS .
   fi
 }
 
@@ -369,7 +368,7 @@ list_images() {
 main() {
   opts "$@"
   verify_cloudsdk
-  log.info "Building DAOS Image(s)"
+  log_section "Building DAOS Image(s)"
   configure_gcp_project
   build_images
   list_images

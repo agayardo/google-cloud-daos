@@ -1,0 +1,182 @@
+#!/usr/bin/env bash
+# By default this script will build of the tip of the master branch.
+#
+# To build the latest tagged version
+#    export DAOS_REPO_TAG="latest"
+#    ./install_daos_from_source_el8.sh
+#
+# To build a specific tagged version
+#    export DAOS_REPO_TAG="v2.3.103-tb"
+#    ./install_daos_from_source_el8.sh
+#
+# To build a specific commit version
+#    export DAOS_REPO_COMMIT="029624a6b"
+#    ./install_daos_from_source_el8.sh
+
+DAOS_REPO_URL="${DAOS_REPO_URL:-https://github.com/daos-stack/daos.git}"
+DAOS_REPO_CLONE_DIR="${DAOS_REPO_CLONE_DIR:-${HOME}/daos}"
+DAOS_REPO_BRANCH="${DAOS_REPO_BRANCH:-lei/DAOS-12142}"
+DAOS_REPO_TAG="${DAOS_REPO_TAG:-}" # latest or specific tag
+DAOS_REPO_COMMIT="${DAOS_REPO_COMMIT:-}"
+DAOS_PREFIX_PATH="/usr"
+
+set -eo pipefail
+
+# BEGIN: Logging variables and functions
+declare -A LOG_LEVELS=([DEBUG]=0 [INFO]=1  [WARN]=2   [ERROR]=3 [FATAL]=4 [OFF]=5)
+declare -A LOG_COLORS=([DEBUG]=2 [INFO]=12 [WARN]=3 [ERROR]=1 [FATAL]=9 [OFF]=0 [OTHER]=15)
+LOG_LEVEL=DEBUG
+
+log() {
+  local msg="$1"
+  local lvl=${2:-INFO}
+  if [[ ${LOG_LEVELS[$LOG_LEVEL]} -le ${LOG_LEVELS[$lvl]} ]]; then
+    if [[ -t 1 ]]; then tput setaf "${LOG_COLORS[$lvl]}"; fi
+    printf "[%-5s] %s\n" "$lvl" "${msg}" 1>&2
+    if [[ -t 1 ]]; then tput sgr0; fi
+  fi
+}
+
+log.debug() { log "${1}" "DEBUG" ; }
+log.info()  { log "${1}" "INFO"  ; }
+log.warn()  { log "${1}" "WARN"  ; }
+log.error() { log "${1}" "ERROR" ; }
+log.fatal() { log "${1}" "FATAL" ; }
+# END: Logging variables and functions
+
+install_required_pkgs() {
+  log.info "Installing required packages"
+  yum -y install dnf git virtualenv
+  dnf -y install  dnf-plugins-core
+
+  log.info "Install epel-release repo"
+  dnf -y install epel-release
+
+  log.info "Enable powertools repo"
+  dnf config-manager --enable powertools
+}
+
+clone_repo() {
+  if [[ ! -d ${DAOS_REPO_CLONE_DIR} ]]; then
+    log.info "Cloning ${DAOS_REPO_URL} to ${DAOS_REPO_CLONE_DIR}"
+    git clone --recurse-submodules "${DAOS_REPO_URL}" "${DAOS_REPO_CLONE_DIR}"
+  fi
+}
+
+checkout() {
+  cd "${DAOS_REPO_CLONE_DIR}"
+  log.info "Checking out branch: ${DAOS_REPO_BRANCH}"
+  git checkout "${DAOS_REPO_BRANCH}"
+
+  if [[ -n "$DAOS_REPO_TAG" ]];then
+    local tag="$DAOS_REPO_TAG"
+    if [[ "$DAOS_REPO_TAG" == "latest" ]]; then
+      tag="$(git describe --tags $(git rev-list --tags --max-count=1))"
+    fi
+    log.info "Checking out tag: ${tag}"
+    git checkout "tags/${tag}"
+  elif [[ -n "$DAOS_REPO_COMMIT" ]];then
+    log.info "Checking out commit: ${DAOS_REPO_COMMIT}"
+    git checkout "${DAOS_REPO_COMMIT}"
+  else
+    log.info "Running git pull"
+    git pull
+  fi
+}
+
+install_daos_dependencies(){
+  log.info "Installing OS updates and packages as required for building DAOS"
+  dnf config-manager --save --setopt=assumeyes=True
+  cd "${DAOS_REPO_CLONE_DIR}/utils/scripts"
+  ./install-el8.sh
+}
+
+setup_venv(){
+  log.info "Setup python virtualenv"
+  cd "${DAOS_REPO_CLONE_DIR}"
+  if [[ ! -d .virtualenv ]]; then
+    python3 -m venv venv
+  fi
+  source venv/bin/activate
+  pip install --upgrade pip
+  pip install -r requirements.txt
+}
+
+install_daos() {
+  cd "${DAOS_REPO_CLONE_DIR}"
+  log.info "Building and installing DAOS"
+  scons PREFIX="${DAOS_PREFIX_PATH}" \
+    TARGET_TYPE=release \
+    BUILD_TYPE=release \
+    --jobs="$(nproc --all)" \
+    --build-deps=only
+
+  # TODO: Is this required?
+  ln -snf "${DAOS_PREFIX_PATH}/prereq/release/spdk/lib/librte_eal.so.22.0" "${DAOS_PREFIX_PATH}/lib/librte_eal.so.22"
+  ln -snf "${DAOS_PREFIX_PATH}/prereq/release/spdk/lib/librte_kvargs.so.22.0" "${DAOS_PREFIX_PATH}/lib/librte_kvargs.so.22"
+  ln -snf "${DAOS_PREFIX_PATH}/prereq/release/spdk/lib/librte_telemetry.so.22.0" "${DAOS_PREFIX_PATH}/lib/librte_telemetry.so.22"
+  ln -snf "${DAOS_PREFIX_PATH}/prereq/release/spdk/lib/librte_ring.so.22.0" "${DAOS_PREFIX_PATH}/lib/librte_ring.so.22"
+  ln -snf "${DAOS_PREFIX_PATH}/prereq/release/spdk/lib/librte_pci.so.22.0" "${DAOS_PREFIX_PATH}/lib/librte_pci.so.22"
+
+  # --no-rpath
+  scons PREFIX="${DAOS_PREFIX_PATH}" \
+    TARGET_TYPE=release \
+    BUILD_TYPE=release \
+    CONF_DIR=/etc/daos \
+    --jobs="$(nproc --all)" \
+    install
+
+  log.info "Copying systemd service files"
+  cp -f utils/systemd/daos_agent.service /etc/systemd/system
+  cp -f utils/systemd/daos_server.service /etc/systemd/system
+
+  if ! grep -q daos_server /etc/passwd; then
+    log.info "Creating daos_server user"
+    useradd --no-log-init --user-group --create-home --shell /bin/bash daos_server
+    echo "daos_server:daos_server" | chpasswd
+    echo "daos_server ALL=(root) NOPASSWD: ALL" >> /etc/sudoers.d/daos_server
+  fi
+
+  if ! grep -q daos_agent /etc/passwd; then
+    log.info "Creating daos_agent user"
+    useradd --no-log-init --user-group --create-home --shell /bin/bash daos_agent
+    echo "daos_agent:daos_agent" | chpasswd
+  fi
+
+  if ! grep -q daos_admin /etc/passwd; then
+    log.info "Creating daos_admin user"
+    useradd --no-log-init --user-group --create-home --shell /bin/bash daos_admin
+    echo "daos_admin:daos_admin" | chpasswd
+    echo "daos_admin ALL=(root) NOPASSWD: ALL" >> /etc/sudoers.d/daos_admin
+  fi
+
+  log.info "Creating /var/run directories"
+  mkdir -p /var/run/daos_server
+  mkdir -p /var/run/daos_agent
+  chown -R daos_server:daos_server /var/run/daos_server
+  chown -R daos_agent:daos_agent /var/run/daos_agent
+
+  #dnf -y install kmod pciutils
+  #/usr/prereq/release/spdk/share/spdk/scripts/setup.sh
+
+}
+
+log_vars() {
+  log.debug "DAOS_REPO_URL=${DAOS_REPO_URL}"
+  log.debug "DAOS_REPO_CLONE_DIR=${DAOS_REPO_CLONE_DIR}"
+  log.debug "DAOS_REPO_BRANCH=${DAOS_REPO_BRANCH}"
+  log.debug "DAOS_REPO_TAG=${DAOS_REPO_TAG}"
+  log.debug "DAOS_REPO_COMMIT=${DAOS_REPO_COMMIT}"
+}
+
+main() {
+  log_vars
+  install_required_pkgs
+  clone_repo
+  checkout
+  install_daos_dependencies
+  setup_venv
+  install_daos
+}
+
+main

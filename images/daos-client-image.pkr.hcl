@@ -48,8 +48,8 @@ source "googlecompute" "daos-client-hpc-centos-7" {
   }
   project_id              = "${var.project_id}"
   scopes                  = ["https://www.googleapis.com/auth/cloud-platform"]
-  source_image_family     = "hpc-centos-7"
-  source_image_project_id = ["cloud-hpc-image-public"]
+  source_image_family     = "rocky-linux-8-optimized-gcp"
+  source_image_project_id = ["rocky-linux-cloud"]
   ssh_username            = "packer"
   zone                    = "${var.zone}"
   state_timeout           = "10m"

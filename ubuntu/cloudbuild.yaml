@@ -1,0 +1,15 @@
+steps:
+  - name: "gcr.io/cloud-builders/docker"
+    args:
+      [
+        "build",
+        "https://github.com/daos-stack/daos.git#master",
+        "-t",
+        "us-central1-docker.pkg.dev/$PROJECT_ID/docker-registry/daos-ubuntu",
+        "-f",
+        "utils/docker/Dockerfile.ubuntu",
+      ]
+
+images:
+  - "us-central1-docker.pkg.dev/$PROJECT_ID/docker-registry/daos-ubuntu"
+tags: ["daos"]

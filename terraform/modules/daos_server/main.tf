@@ -1,5 +1,5 @@
 /**
- * Copyright 2022 Google LLC
+ * Copyright 2021 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -177,7 +177,7 @@ resource "google_compute_instance_template" "daos_sig_template" {
 resource "google_compute_instance_group_manager" "daos_sig" {
   description = "Stateful Instance group for DAOS servers"
   name        = var.mig_name
-  depends_on = [
+  depends_on  = [
     google_secret_manager_secret.daos_ca
   ]
 
@@ -195,7 +195,7 @@ resource "google_compute_per_instance_config" "named_instances" {
   zone                   = var.zone
   project                = var.project_id
   instance_group_manager = google_compute_instance_group_manager.daos_sig.name
-  count                  = var.number_of_instances
+  count                  = 0 # var.number_of_instances # 0
   name                   = format("%s-%04d", var.instance_base_name, sum([count.index, 1]))
   preserved_state {
     metadata = {

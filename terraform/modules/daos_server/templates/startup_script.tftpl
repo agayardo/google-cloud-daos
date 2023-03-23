@@ -1,7 +1,7 @@
-#!/usr/bin/env bash
+#!/bin/bash
 
 METADATA_URL="http://metadata.google.internal/computeMetadata/v1/instance/attributes"
-DAOS_SERVER_SYSTEMD_FILE="/usr/lib/systemd/system/daos_server.service"
+DAOS_SERVER_SYSTEMD_FILE="/etc/systemd/system/daos_server.service"
 FIRST_DAOS_SERVER_HOSTNAME="${first_server}"
 
 fetch_attr()
@@ -30,6 +30,14 @@ fetch_attr "daos_agent_yaml_content" > daos_agent.yml
 # Modify systemd script for GCP
 # GCP does not support VFIO so daos_server must run as root
 sed -i "s/User=daos_server/User=root/; s/Group=daos_server/Group=root/" $${DAOS_SERVER_SYSTEMD_FILE}
+
+chmod 4755 /usr/bin/daos_server_helper || true
+chmod 4755 /usr/bin/daos_admin || true
+mkdir -p /var/run/daos_server
+ln -s /usr/prereq/release/spdk/include /usr/share/spdk/include || true
+ln -s /usr/prereq/release/spdk/scripts /usr/share/spdk/scripts || true
+ln -s /usr/prereq/release/spdk/share/spdk /usr/share || true
+/usr/share/daos/control/setup_spdk.sh
 
 # Enable and start services
 systemctl enable daos_server

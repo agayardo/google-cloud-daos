@@ -1,0 +1,172 @@
+#cloud-config
+write_files:
+- path: /etc/sysctl.conf
+  permissions: '0644'
+  owner: root
+  content: |
+    net.ipv4.tcp_rmem = 4096 87380 16777216
+    net.ipv4.tcp_wmem = 4096 16384 16777216
+    net.ipv4.tcp_fastopen=3
+# net.ipv4.tcp_rmem = 4096 87380 16777216
+# net.ipv4.tcp_wmem = 4096 16384 16777216
+# net.core.busy_read=50
+# net.core.busy_poll=50
+# net.ipv4.tcp_fastopen=3
+- path: /var/scripts/daos_startup.sh
+  permissions: '0555'
+  owner: root
+  content: |
+    #!/bin/bash
+    set -e
+    yum -y install kmod pciutils htop
+    mkdir -p /var/run/daos_server
+    ln -f -s /etc/daos/* /opt/daos/etc
+    ln -s /opt/daos/prereq/release/spdk/share/spdk /usr/share/spdk
+    daos_server start
+
+- path: /etc/daos/daos_control_template.yml
+  permissions: '0444'
+  owner: root
+  content: |
+    port: 10001
+    hostlist: [ HOSTLIST_VAR ]
+    transport_config:
+      allow_insecure: true
+
+- path: /etc/daos/daos_server_template.yml
+  permissions: '0444'
+  owner: root
+  content: |
+    access_points: [ ACCESS_POINTS_VAR ]
+
+    transport_config:
+      allow_insecure: true
+
+    provider: ofi+tcp;ofi_rxm
+    disable_vfio: true
+    crt_timeout: 300
+    nr_hugepages: 8192
+    control_log_file: /var/daos_server.log
+
+    engines:
+      - targets: 16
+        nr_xs_helpers: 0
+        first_core: 0
+        bypass_health_chk: true
+        fabric_iface: eth0
+        fabric_iface_port: 31316
+        log_mask: ERR
+        log_file: /var/daos/engine.log
+
+        env_vars:
+          - FI_OFI_RXM_DEF_TCP_WAIT_OBJ=pollfd
+          - DTX_AGG_THD_CNT=16777216
+          - DTX_AGG_THD_AGE=700
+
+        storage:
+          - scm_mount: /var/daos/ram
+            class: ram
+            scm_size: 200
+          - class: nvme
+            bdev_list: ["0000:00:04.0"]
+
+- path: /var/scripts/docker-login.sh
+  permissions: '0444'
+  owner: root
+  content: |
+    METADATA=http://metadata.google.internal/computeMetadata/v1
+    SVC_ACCT=$METADATA/instance/service-accounts/default
+    ACCESS_TOKEN=$(/usr/bin/curl -s -H 'Metadata-Flavor: Google' $SVC_ACCT/token | cut -d '"' -f 4)
+    # Login to container registry with retries.
+    MAX_ATTEMPTS=3
+    SLEEP_SECONDS=1
+    i=1
+    while [ $i -lt $MAX_ATTEMPTS ]; do
+      AR_STATUS=0
+      echo "Starting the docker login attempt $i"
+      (echo $ACCESS_TOKEN | docker login --username oauth2accesstoken --password-stdin https://us-central1-docker.pkg.dev) || AR_STATUS=$?
+      echo "Docker login attempt $i, status code ar: $AR_STATUS"
+      if [[ "$AR_STATUS" -eq "0" ]]; then
+        break
+      fi
+      let i=i+1
+      sleep $SLEEP_SECONDS
+    done
+
+- path: /var/scripts/get-vm-metadata-attribute-with-default-val.sh
+  permissions: '0444'
+  owner: root
+  content: |
+    PROP_NAME=$1
+    DEFAULT_VAL=$2
+    # fetch metadata attribute value
+    METADATA_RESPONSE=$(/usr/share/google/get_metadata_value attributes/$PROP_NAME)
+    return_code=$?
+    if [[ $return_code != 0 ]]; then
+      echo $DEFAULT_VAL
+    else
+      echo "$METADATA_RESPONSE"
+    fi
+
+- path: /var/scripts/docker-run.sh
+  permissions: '0444'
+  owner: root
+  content: |
+    set -e
+    export HOME=/home/root
+
+    echo "Running sysctl -p"
+    sysctl -p
+
+    echo "Docker login"
+    bash /var/scripts/docker-login.sh
+
+    echo "Getting the docker image and name from metadata"
+    CONTAINER_NAME=$(/bin/sh /var/scripts/get-vm-metadata-attribute-with-default-val.sh container-name)
+    echo "CONTAINER_NAME: $CONTAINER_NAME"
+
+    echo "Getting daos config dir from metadata"
+    DAOS_CONFIG_DIR=$(/bin/sh /var/scripts/get-vm-metadata-attribute-with-default-val.sh daos-config-directory "/etc/daos")
+    echo "DAOS_CONFIG_DIR: $DAOS_CONFIG_DIR"
+
+    echo "Setting up daos_control.yml"
+    HOSTLIST=$(/bin/sh /var/scripts/get-vm-metadata-attribute-with-default-val.sh hostlist)
+    echo "HOSTLIST: $HOSTLIST"
+    rm -f "${DAOS_CONFIG_DIR}/daos_control.yml"
+    sed "s/HOSTLIST_VAR/${HOSTLIST}/g" "/etc/daos/daos_control_template.yml" > "${DAOS_CONFIG_DIR}/daos_control.yml"
+
+    echo "Setting up daos_server.yml"
+    ACCESS_POINTS=$(/bin/sh /var/scripts/get-vm-metadata-attribute-with-default-val.sh access-points)
+    echo "ACCESS_POINTS: $ACCESS_POINTS"
+    rm -f "${DAOS_CONFIG_DIR}/daos_server.yml"
+    sed "s/ACCESS_POINTS_VAR/${ACCESS_POINTS}/g" "/etc/daos/daos_server_template.yml" > "${DAOS_CONFIG_DIR}/daos_server.yml"
+
+    echo "Setting hugepages"
+    echo 8192 | tee /proc/sys/vm/nr_hugepages
+
+    echo "Setting firewall"
+    iptables -A INPUT -p tcp -j ACCEPT
+
+    echo "Starting docker"
+
+    for i in $(seq 1 5)
+    do
+      docker pull "${CONTAINER_NAME}" || break
+      echo "Retrying $i"
+      sleep 3
+    done
+
+    docker run -u 0 --name=server \
+      --privileged \
+      --cap-add=ALL \
+      --network=host \
+      --entrypoint /opt/daos/bin/daos_startup.sh \
+      --restart unless-stopped \
+      -v /dev:/dev \
+      -v /etc/daos:/etc/daos:ro \
+      -v /var/scripts/daos_startup.sh:/opt/daos/bin/daos_startup.sh:ro \
+      -v /lib/modules:/lib/modules \
+      "${CONTAINER_NAME}"
+
+runcmd:
+  - bash /var/scripts/docker-run.sh
