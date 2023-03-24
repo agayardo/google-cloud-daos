@@ -57,7 +57,7 @@ DAOS_CONT_REPLICATION_FACTOR=rf:0,ec_cell_sz:131072
 IO500_STONEWALL_TIME=180  # Number of seconds to run the benchmark
 
 # Use DFUSE
-DAOS_API="DFS"
+DAOS_API="LD_PRELOAD"
 
 IO500_NP_SCALE=2
 

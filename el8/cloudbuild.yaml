@@ -3,7 +3,7 @@ steps:
     args:
       [
         "build",
-        "https://github.com/daos-stack/daos.git#master",
+        "https://github.com/daos-stack/daos.git#lei/DAOS-12142",
         "-t",
         "us-central1-docker.pkg.dev/$PROJECT_ID/docker-registry/daos-el8-ld-preload-pil4dfs",
         "-f",
