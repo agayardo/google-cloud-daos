@@ -24,6 +24,9 @@
 #
 
 set -e
+
+echo "!!!!!!!Running $0"
+
 trap 'echo "Hit an unexpected and unchecked error. Exiting."' ERR
 
 SCRIPT_NAME="$(basename "$0")"

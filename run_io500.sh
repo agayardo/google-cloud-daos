@@ -2,6 +2,8 @@
 
 set -e
 
+echo "!!!!!!Running $0"
+
 RESULT_NAME="cos-sx-clients16-servers4-targets16"
 IO500_DIR="google-cloud-daos/terraform/examples/io500"
 

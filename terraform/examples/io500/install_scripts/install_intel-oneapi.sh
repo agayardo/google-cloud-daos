@@ -19,7 +19,7 @@
 
 set -e
 trap 'echo "An unexpected error occurred. Exiting."' ERR
-
+echo "!!!!!!Running $0"
 log() {
   # shellcheck disable=SC2155,SC2183
   local line=$(printf "%80s" | tr " " "-")

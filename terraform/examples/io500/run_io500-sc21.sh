@@ -19,7 +19,7 @@
 # Instructions that were referenced to create this script are at
 # https://daosio.atlassian.net/wiki/spaces/DC/pages/11055792129/IO-500+SC21
 #
-
+echo "!!!!!!Running $0"
 IO500_VERSION_TAG=io500-sc21
 
 # # Determine if this script is being sourced
