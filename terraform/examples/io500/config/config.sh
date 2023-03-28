@@ -51,13 +51,11 @@ DAOS_CLIENT_GVNIC=true
 
 # Storage
 DAOS_POOL_SIZE="$(awk -v disk_count=${DAOS_SERVER_DISK_COUNT} -v server_count=${DAOS_SERVER_INSTANCE_COUNT} 'BEGIN {pool_size = 375 * disk_count * server_count / 1000; print pool_size"TB"}')"
-DAOS_CONT_REPLICATION_FACTOR=rf:0,ec_cell_sz:131072
+DAOS_CONT_REPLICATION_FACTOR=rf:1,ec_cell_sz:131072
 
-# IO500
 IO500_STONEWALL_TIME=180  # Number of seconds to run the benchmark
 
-# Use DFUSE
-DAOS_API="LD_PRELOAD"
+DAOS_API="${DAOS_API:-LD_PRELOAD}"
 
 IO500_NP_SCALE=2
 
